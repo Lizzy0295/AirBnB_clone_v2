@@ -1,17 +1,20 @@
 #!/usr/bin/python3
 """ Place Module for HBNB project """
 from models.base_model import BaseModel, Base
-from models.review import Review
+from sqlalchemy import Column, String, Integer, ForeignKey, Float, Table
 from sqlalchemy.orm import relationship
-from sqlalchemy import Column, String, ForeignKey, Integer, Float
-from os import getenv
+import os
+
+place_amenity = Table('place_amenity', Base.metadata,
+    Column('place_id', String(60), ForeignKey('places.id')),
+    Column('amenity_id', String(60), ForeignKey('amenities.id'))
+)
 
 
 class Place(BaseModel, Base):
     """ A place to stay """
-    if getenv("HBNB_TYPE_STORAGE") == "db":
-        __tablename__ = 'places'
-
+    __tablename__ = "places"
+    if os.getenv("HBNB_TYPE_STORAGE") == "db":
         city_id = Column(String(60), ForeignKey('cities.id'), nullable=False)
         user_id = Column(String(60), ForeignKey('users.id'), nullable=False)
         name = Column(String(128), nullable=False)
@@ -23,9 +26,15 @@ class Place(BaseModel, Base):
         latitude = Column(Float)
         longitude = Column(Float)
 
-        reviews = relationship("Review", backref="place",
-                               cascade="all, delete-orphan")
+        reviews = relationship('Review', backref="place",
+                              cascade="all, delete-orphan")
+        amenities = relationship('Amenity',
+                                back_populates='place_amenities',
+                                secondary= place_amenity,
+                                viewonly=False)
+
     else:
+
         city_id = ""
         user_id = ""
         name = ""
@@ -39,13 +48,28 @@ class Place(BaseModel, Base):
         amenity_ids = []
 
         @property
-        def reviews(self):
-            """Getter attribute for reviews in FileStorage"""
+        def amenities(self):
             from models import storage
-            all_reviews = storage.all(Review)
-            return [review for review in all_reviews.values()
-                    if review.place_id == self.id]
+            listen = []
+            for amenity_id in self.amenity_ids:
+                dict_ = storage.all(storage.classes['Amenity'])\
+                    .get("Amenity.{}".format(amenity_id))
+                if dict_:
+                    listen.append(dict_)
+            return listen
+            # dict_ = storage.all(storage.classes['Amenity'])
+            # for key in dict_:
+            #     if key.split('.')[1] in self.amenity_ids:
+            #         listen.append(dict_[key])
+            # return listen
 
-    def __init__(self, *args, **kwargs):
-        """initializes place"""
-        super().__init__(*args, **kwargs)
+        @property
+        def reviews(self):
+            from models import storage
+            file_reviews = storage.all(storage.classes['Review']).values()
+            return [review  for review in file_reviews if review.place_id == self.id]
+
+        @amenities.setter
+        def amenities(self, obj):
+            if obj.__class__.__name__ == 'Amenity':
+                self.amenity_ids.append(obj.id)
