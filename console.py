@@ -10,7 +10,9 @@ from models.state import State
 from models.city import City
 from models.amenity import Amenity
 from models.review import Review
-import shlex
+from os import getenv
+from datetime import datetime
+import uuid
 
 
 class HBNBCommand(cmd.Cmd):
@@ -20,16 +22,16 @@ class HBNBCommand(cmd.Cmd):
     prompt = '(hbnb) ' if sys.__stdin__.isatty() else ''
 
     classes = {
-        'BaseModel': BaseModel, 'User': User, 'Place': Place,
-        'State': State, 'City': City, 'Amenity': Amenity,
-        'Review': Review
-    }
+               'BaseModel': BaseModel, 'User': User, 'Place': Place,
+               'State': State, 'City': City, 'Amenity': Amenity,
+               'Review': Review
+              }
     dot_cmds = ['all', 'count', 'show', 'destroy', 'update']
     types = {
-        'number_rooms': int, 'number_bathrooms': int,
-        'max_guest': int, 'price_by_night': int,
-        'latitude': float, 'longitude': float
-    }
+             'number_rooms': int, 'number_bathrooms': int,
+             'max_guest': int, 'price_by_night': int,
+             'latitude': float, 'longitude': float
+            }
 
     def preloop(self):
         """Prints if isatty is false"""
@@ -37,11 +39,13 @@ class HBNBCommand(cmd.Cmd):
             print('(hbnb)')
 
     def precmd(self, line):
-        """Reformat command line for advanced command syntax
+        """Reformat command line for advanced command syntax.
+
         Usage: <class name>.<command>([<id> [<*args> or <**kwargs>]])
         (Brackets denote optional fields in usage example.)
         """
         _cmd = _cls = _id = _args = ''  # initialize line elements
+        # print(line)
 
         # scan for general formating - i.e '.', '(', ')'
         if not ('.' in line and '(' in line and ')' in line):
@@ -114,31 +118,43 @@ class HBNBCommand(cmd.Cmd):
         pass
 
     def do_create(self, args):
-        """ Create an object of any class"""
-        if len(args) == 0:
+        """Create an object of any class"""
+        cmds = args.split(' ')
+        if not args:
             print("** class name missing **")
-            return
-        try:
-            args = shlex.split(args)
-            new_instance = eval(args[0])()
-            for i in args[1:]:
-                try:
-                    key = i.split("=")[0]
-                    value = i.split("=")[1]
-                    if hasattr(new_instance, key) is True:
-                        value = value.replace("_", " ")
-                        try:
-                            value = eval(value)
-                        except:
-                            pass
-                        setattr(new_instance, key, value)
-                except (ValueError, IndexError):
-                    pass
-            new_instance.save()
-            print(new_instance.id)
-        except:
+            # return
+        elif cmds[0] not in HBNBCommand.classes:
             print("** class doesn't exist **")
-            return
+            # return
+        # print(f"cmds {cmds}")
+        else:
+            kwargs = {}
+            for atr in cmds:
+                if '=' in atr:
+                    atr = atr.split('=')  # split list into key, value
+                    if atr[1].isdigit():
+                        atr[1] = int(atr[1])
+                        kwargs[atr[0]] = atr[1]
+                    elif atr[1].find('.') != -1:
+                        try:
+                            atr[1] = float(atr[1]) # try to convert to float if possible
+                            kwargs[atr[0]] = atr[1]
+                        except:
+                            kwargs[atr[0]] = atr[1] ## if not possible, leave as string
+                    elif atr[1].find('\"') != -1:
+                        atr[1] = atr[1].replace('\"', '')
+                        if atr[1].find('_') != -1:
+                            atr[1] = atr[1].replace('_', ' ')
+                        kwargs[atr[0]] = atr[1]
+            if getenv("HBNB_TYPE_STORAGE") == "db":
+                new_instance = HBNBCommand.classes[cmds[0]](**kwargs)
+                new_instance.save()
+            else:
+                new_instance = HBNBCommand.classes[cmds[0]]()
+                kwargs.update(new_instance.to_dict())
+                new_instance = HBNBCommand.classes[cmds[0]](**kwargs)
+                new_instance.save()
+            print(new_instance.id)
 
     def help_create(self):
         """ Help information for the create method """
@@ -201,7 +217,7 @@ class HBNBCommand(cmd.Cmd):
         key = c_name + "." + c_id
 
         try:
-            del(storage.all()[key])
+            del (storage.all()[key])
             storage.save()
         except KeyError:
             print("** no instance found **")
@@ -211,29 +227,31 @@ class HBNBCommand(cmd.Cmd):
         print("Destroys an individual instance of a class")
         print("[Usage]: destroy <className> <objectId>\n")
 
-    def do_all(self, line):
-        """Prints all string representation of all instances
-        Exceptions:
-            NameError: when there is no object taht has the name
-        """
-        objects = storage.all()
-        my_list = []
-        if not line:
-            for key in objects:
-                my_list.append(str(objects[key]))
-            print(my_list)
-            return
-        try:
-            args = line.split(" ")
-            if args[0] not in type(self).classes:
-                raise NameError()
-            for key in objects:
-                name = key.split('.')
-                if name[0] == args[0]:
-                    my_list.append(str(objects[key]))
-            print(my_list)
-        except NameError:
-            print("** class doesn't exist **")
+    def do_all(self, args):
+        """ Shows all objects, or all objects of a class"""
+        print_list = []
+        if args:
+            args = args.split(' ')[0]  # remove possible trailing args
+            if args not in HBNBCommand.classes:
+                print("** class doesn't exist **")
+                return
+            if getenv("HBNB_TYPE_STORAGE") == "db":
+                # print(f"storage all {storage.all(args)}")
+                for k, v in storage.all(args).items():
+                    print_list.append(str(v))
+            else:
+                for k, v in storage._FileStorage__objects.items():
+                    if k.split('.')[0] == args:
+                        print_list.append(str(v))
+        else:
+            if getenv("HBNB_TYPE_STORAGE") == "db":
+                for k, v in storage.all().items():
+                    print_list.append(str(v))
+            else:
+                for k, v in storage._FileStorage__objects.items():
+                    print_list.append(str(v))
+
+        print(print_list)
 
     def help_all(self):
         """ Help information for the all command """
@@ -271,7 +289,7 @@ class HBNBCommand(cmd.Cmd):
         args = args[2].partition(" ")
         if args[0]:
             c_id = args[0]
-        else:
+        else:  # id not present
             print("** instance id missing **")
             return
 
@@ -286,7 +304,7 @@ class HBNBCommand(cmd.Cmd):
         # first determine if kwargs or args
         if '{' in args[2] and '}' in args[2] and type(eval(args[2])) is dict:
             kwargs = eval(args[2])
-            args = []  # reformat kwargs into list, ex: [<name>, <value>, ...]
+            args = []  # reformat kwargs into list, ex: [<name>, <value>, ..]
             for k, v in kwargs.items():
                 args.append(k)
                 args.append(v)
